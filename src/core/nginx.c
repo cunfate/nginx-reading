@@ -359,12 +359,14 @@ main(int argc, char *const *argv)
         return 0;
     }
 
+    // 如果该进程带有-s <signal> 属性，则转到处理signal上去
     if (ngx_signal) {
         return ngx_signal_process(cycle, ngx_signal);
     }
 
     ngx_os_status(cycle->log);
 
+    // 设置主循环为cycle
     ngx_cycle = cycle;
 
     ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
@@ -379,6 +381,7 @@ main(int argc, char *const *argv)
         return 1;
     }
 
+    // 以守护进程运行nginx
     if (!ngx_inherited && ccf->daemon) {
         if (ngx_daemon(cycle->log) != NGX_OK) {
             return 1;

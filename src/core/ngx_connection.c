@@ -482,11 +482,14 @@ ngx_configure_listening_sockets(ngx_cycle_t *cycle)
     int                        timeout;
 #endif
 
+    // 遍历cycle->listening
     ls = cycle->listening.elts;
     for (i = 0; i < cycle->listening.nelts; i++) {
 
+        // copy log
         ls[i].log = *ls[i].logp;
 
+        // 配置recv buffer大小
         if (ls[i].rcvbuf != -1) {
             if (setsockopt(ls[i].fd, SOL_SOCKET, SO_RCVBUF,
                            (const void *) &ls[i].rcvbuf, sizeof(int))
@@ -498,6 +501,7 @@ ngx_configure_listening_sockets(ngx_cycle_t *cycle)
             }
         }
 
+        // 配置 send buffer大小
         if (ls[i].sndbuf != -1) {
             if (setsockopt(ls[i].fd, SOL_SOCKET, SO_SNDBUF,
                            (const void *) &ls[i].sndbuf, sizeof(int))
@@ -510,6 +514,7 @@ ngx_configure_listening_sockets(ngx_cycle_t *cycle)
         }
 
 #if (NGX_HAVE_SETFIB)
+        // 配置setfib
         if (ls[i].setfib != -1) {
             if (setsockopt(ls[i].fd, SOL_SOCKET, SO_SETFIB,
                            (const void *) &ls[i].setfib, sizeof(int))

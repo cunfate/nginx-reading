@@ -605,6 +605,7 @@ ngx_init_cycle(ngx_cycle_t *old_cycle)
 
     /* commit the new cycle configuration */
 
+    // 若配置的logfile不是stderr，则打开一个文件作为stderr
     if (!ngx_use_stderr && cycle->log->file->fd != ngx_stderr) {
 
         if (ngx_set_stderr(cycle->log->file->fd) == NGX_FILE_ERROR) {
@@ -742,6 +743,7 @@ old_shm_zone_done:
 
     ngx_destroy_pool(conf.temp_pool);
 
+    // master进程或者old_Cycle是init进程，就返回现有的cycle
     if (ngx_process == NGX_PROCESS_MASTER || ngx_is_init_cycle(old_cycle)) {
 
         /*
@@ -1051,6 +1053,7 @@ ngx_delete_pidfile(ngx_cycle_t *cycle)
 }
 
 
+// 会读取conf_ctx中配置的pid文件路径，从文件路径中读取进程的pid号，然后对相应的进程pid发送相应信号
 ngx_int_t
 ngx_signal_process(ngx_cycle_t *cycle, char *sig)
 {

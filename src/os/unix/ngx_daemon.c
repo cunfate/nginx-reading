@@ -20,12 +20,15 @@ ngx_int_t ngx_daemon(ngx_log_t *log)
     case 0:
         break;
 
+        // 父进程退出
     default:
         exit(0);
     }
 
+    // 记录自己的pid
     ngx_pid = ngx_getpid();
 
+    // 脱离父进程的session
     if (setsid() == -1) {
         ngx_log_error(NGX_LOG_EMERG, log, ngx_errno, "setsid() failed");
         return NGX_ERROR;
@@ -33,6 +36,7 @@ ngx_int_t ngx_daemon(ngx_log_t *log)
 
     umask(0);
 
+    // 打开/dev/null, 重定向stdin 和stdout
     fd = open("/dev/null", O_RDWR);
     if (fd == -1) {
         ngx_log_error(NGX_LOG_EMERG, log, ngx_errno,
