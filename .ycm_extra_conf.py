@@ -60,6 +60,10 @@ os.path.join(os.environ.get('HOME'), 'workspace/nginx-0.8.55/src/core'),
 os.path.join(os.environ.get('HOME'), 'workspace/nginx-0.8.55/src/mail'),
 '-isystem',
 os.path.join(os.environ.get('HOME'), 'workspace/nginx-0.8.55/src/misc'),
+'-isystem',
+os.path.join(os.environ.get('HOME'), 'workspace/nginx-0.8.55/objs'),
+'-isystem',
+'/usr/include/x86_64-linux-gnu',
 ]
 
 
