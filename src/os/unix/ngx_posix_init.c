@@ -39,6 +39,7 @@ ngx_os_init(ngx_log_t *log)
     }
 #endif
 
+    // 修改nginx进程描述
     ngx_init_setproctitle(log);
 
     ngx_pagesize = getpagesize();
@@ -50,8 +51,10 @@ ngx_os_init(ngx_log_t *log)
         ngx_ncpu = 1;
     }
 
+    // 获取一些cpu相关的信息，如cache大小等
     ngx_cpuinfo();
 
+    // 获取limit信息，设置最大socket数量
     if (getrlimit(RLIMIT_NOFILE, &rlmt) == -1) {
         ngx_log_error(NGX_LOG_ALERT, log, errno,
                       "getrlimit(RLIMIT_NOFILE) failed)");
@@ -66,6 +69,7 @@ ngx_os_init(ngx_log_t *log)
     ngx_inherited_nonblocking = 0;
 #endif
 
+    // 设置随机数种子
     srandom(ngx_time());
 
     return NGX_OK;

@@ -38,6 +38,7 @@ volatile ngx_str_t       ngx_cached_http_log_time;
 
 static ngx_int_t         cached_gmtoff;
 #endif
+// 以下都是时间缓存，有一个全局变量slot管理目前要更新哪个缓存
 
 static ngx_time_t        cached_time[NGX_TIME_SLOTS];
 static u_char            cached_err_log_time[NGX_TIME_SLOTS]
@@ -153,6 +154,7 @@ ngx_time_update(void)
                        ngx_abs(tp->gmtoff / 60), ngx_abs(tp->gmtoff % 60));
 
 
+    //内存屏障，防止指令重排
     ngx_memory_barrier();
 
     ngx_cached_time = tp;

@@ -203,10 +203,12 @@ main(int argc, char *const *argv)
     ngx_cycle_t      *cycle, init_cycle;
     ngx_core_conf_t  *ccf;
 
+    // 解析命令行输入参数, 会修改一些全局变量如ngx_show_version
     if (ngx_get_options(argc, argv) != NGX_OK) {
         return 1;
     }
 
+    // 处理-h，打印一些提示信息
     if (ngx_show_version) {
         ngx_log_stderr(0, "nginx version: " NGINX_VER);
 
@@ -262,14 +264,17 @@ main(int argc, char *const *argv)
 
     /* TODO */ ngx_max_sockets = -1;
 
+    // 初始化时间并更新一些时间缓存
     ngx_time_init();
 
 #if (NGX_PCRE)
     ngx_regex_init();
 #endif
 
+    // 获取pid
     ngx_pid = ngx_getpid();
 
+    // 打开log文件,初始化ngx_log结构体, 返回ngx_log的指针，存到log里，接下来会放到init_cycle里吧。
     log = ngx_log_init(ngx_prefix);
     if (log == NULL) {
         return 1;
@@ -285,23 +290,28 @@ main(int argc, char *const *argv)
      * ngx_process_options()
      */
 
+    // 终于开始初始化init_cycle结构体了
     ngx_memzero(&init_cycle, sizeof(ngx_cycle_t));
     init_cycle.log = log;
-    ngx_cycle = &init_cycle;
+    ngx_cycle = &init_cycle; //把ngx_cycle设置为init_cycle（你说你图啥）
 
+    // 创建一个大小为1024的内存池
     init_cycle.pool = ngx_create_pool(1024, log);
     if (init_cycle.pool == NULL) {
         return 1;
     }
 
+    // 保存传入参数, 保存到了全局变量里，其实没有init_cycle啥事，就是用了一下它存的log（神经病啊
     if (ngx_save_argv(&init_cycle, argc, argv) != NGX_OK) {
         return 1;
     }
 
+    // 处理一些init_cycle的变量，比如prefix, conf_prefix等
     if (ngx_process_options(&init_cycle) != NGX_OK) {
         return 1;
     }
 
+    // 对os相关的东西进行一次初始化，包括修改进程名、设置cpu相关信息、设置socket数量限制等
     if (ngx_os_init(log) != NGX_OK) {
         return 1;
     }
@@ -310,19 +320,26 @@ main(int argc, char *const *argv)
      * ngx_crc32_table_init() requires ngx_cacheline_size set in ngx_os_init()
      */
 
+    // 比较crc32 table的起始地址是否相对于cpu缓存大小对齐，如果没有对齐则创建一块对齐的内存把这个table转移进去
+    // 啊这就是大佬对于内存的优化啊，学到了学到了（学到了你也不会用
     if (ngx_crc32_table_init() != NGX_OK) {
         return 1;
     }
 
+    // 从环境变量NGINX中读取监听的fd（以:;分隔），然后保存这些fd到init_cycle.listening中，
+    // 并且通过getsockname, getsockopt等系统调用对这些fd相关的信息进行读取，并保存在init_cycle.listening中
+    // 这个过程主要是为平滑升级准备的，旧的nginx进程通过运行fork && execl 加载新的nginx进程，而其监听的端口的fd则保存在NGINX这个环境变量里进行通信
     if (ngx_add_inherited_sockets(&init_cycle) != NGX_OK) {
         return 1;
     }
 
+    // 初始化ngx_modules的index成员
     ngx_max_module = 0;
     for (i = 0; ngx_modules[i]; i++) {
         ngx_modules[i]->index = ngx_max_module++;
     }
 
+    // 一个800多行的函数，完成了所有模块的初始化工作
     cycle = ngx_init_cycle(&init_cycle);
     if (cycle == NULL) {
         if (ngx_test_config) {
@@ -414,6 +431,7 @@ ngx_add_inherited_sockets(ngx_cycle_t *cycle)
 
     inherited = (u_char *) getenv(NGINX_VAR);
 
+    // 如果没有相关信息直接return
     if (inherited == NULL) {
         return NGX_OK;
     }

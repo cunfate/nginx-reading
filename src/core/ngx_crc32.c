@@ -106,6 +106,7 @@ ngx_crc32_table_init(void)
 {
     void  *p;
 
+    // 比较ngx_crc32_table_short是否相对于ngx_cacheline_size对齐,如果正好对齐则什么都不做
     if (((uintptr_t) ngx_crc32_table_short
           & ~((uintptr_t) ngx_cacheline_size - 1))
         == (uintptr_t) ngx_crc32_table_short)
@@ -113,6 +114,7 @@ ngx_crc32_table_init(void)
         return NGX_OK;
     }
 
+    // 如果没对齐，就创建一块内存，对齐这块指针之后，把table拷贝进对齐的地址里
     p = ngx_alloc(16 * sizeof(uint32_t) + ngx_cacheline_size, ngx_cycle->log);
     if (p == NULL) {
         return NGX_ERROR;
