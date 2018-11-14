@@ -288,14 +288,18 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
         ls = cycle->listening.elts;
         for (i = 0; i < cycle->listening.nelts; i++) {
 
+            // 无视的不动
             if (ls[i].ignore) {
                 continue;
             }
 
+            // 无效的不处理
             if (ls[i].fd != -1) {
                 continue;
             }
 
+            // 继承来的不处理, inherited关键字会在ngx_set_inherited_socket函数内设置
+            // 也即平滑升级时从上一个进程内继承来的listening_socket不做处理
             if (ls[i].inherited) {
 
                 /* TODO: close on exit */
@@ -305,6 +309,7 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
                 continue;
             }
 
+            // 打开socket
             s = ngx_socket(ls[i].sockaddr->sa_family, ls[i].type, 0);
 
             if (s == -1) {
@@ -313,6 +318,7 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
                 return NGX_ERROR;
             }
 
+            // 使能socket reuseaddr
             if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
                            (const void *) &reuseaddr, sizeof(int))
                 == -1)
@@ -332,6 +338,7 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
 
 #if (NGX_HAVE_INET6 && defined IPV6_V6ONLY)
 
+            // 如果有ipv6且只监听ipv6则打开ipv6端口，则设置socket为ipv6only
             if (ls[i].sockaddr->sa_family == AF_INET6 && ls[i].ipv6only) {
                 int  ipv6only;
 
@@ -349,6 +356,7 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
 #endif
             /* TODO: close on exit */
 
+            // 如果不使用aio借口，则设置socket为nonblock io
             if (!(ngx_event_flags & NGX_USE_AIO_EVENT)) {
                 if (ngx_nonblocking(s) == -1) {
                     ngx_log_error(NGX_LOG_EMERG, log, ngx_socket_errno,
@@ -368,6 +376,7 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
             ngx_log_debug2(NGX_LOG_DEBUG_CORE, log, 0,
                            "bind() %V #%d ", &ls[i].addr_text, s);
 
+            // 绑定socket地址
             if (bind(s, ls[i].sockaddr, ls[i].socklen) == -1) {
                 err = ngx_socket_errno;
 
@@ -395,6 +404,7 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
 
 #if (NGX_HAVE_UNIX_DOMAIN)
 
+            // 处理unix domain的情况
             if (ls[i].sockaddr->sa_family == AF_UNIX) {
                 mode_t   mode;
                 u_char  *name;
@@ -416,6 +426,7 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
             }
 #endif
 
+            // 调用listen
             if (listen(s, ls[i].backlog) == -1) {
                 ngx_log_error(NGX_LOG_EMERG, log, ngx_socket_errno,
                               "listen() to %V, backlog %d failed",
@@ -430,8 +441,10 @@ ngx_open_listening_sockets(ngx_cycle_t *cycle)
                 return NGX_ERROR;
             }
 
+            // 设置listen=1，表示已监听
             ls[i].listen = 1;
 
+            // 记录fd号
             ls[i].fd = s;
         }
 
