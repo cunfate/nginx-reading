@@ -81,6 +81,7 @@ ngx_event_accept(ngx_event_t *ev)
         ngx_accept_disabled = ngx_cycle->connection_n / 8
                               - ngx_cycle->free_connection_n;
 
+        // 从连接池中取到一个空闲链接对象分配给这个新连接
         c = ngx_get_connection(s, ev->log);
 
         if (c == NULL) {
@@ -261,13 +262,15 @@ ngx_event_accept(ngx_event_t *ev)
             ev->available--;
         }
 
-    } while (ev->available);
+    } while (ev->available); // 这里的available是让一次调用中尽可能多的建立连接
+    // 因此在epoll情况下，available不会改变，相当于while(1)，只有在accept失败触发EAGAIN错误才会返回。
 }
 
 
 ngx_int_t
 ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
 {
+    // 试图拿到accept锁
     if (ngx_shmtx_trylock(&ngx_accept_mutex)) {
 
         ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
@@ -280,6 +283,7 @@ ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
             return NGX_OK;
         }
 
+        // 拿到锁后把所有的listen事件监听设为可用
         if (ngx_enable_accept_events(cycle) == NGX_ERROR) {
             ngx_shmtx_unlock(&ngx_accept_mutex);
             return NGX_ERROR;
@@ -294,6 +298,7 @@ ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "accept mutex lock failed: %ui", ngx_accept_mutex_held);
 
+    // 获取锁失败后关闭所有listen事件
     if (ngx_accept_mutex_held) {
         if (ngx_disable_accept_events(cycle) == NGX_ERROR) {
             return NGX_ERROR;

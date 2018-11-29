@@ -215,6 +215,7 @@ ngx_epoll_init(ngx_cycle_t *cycle, ngx_msec_t timer)
 
     epcf = ngx_event_get_conf(cycle->conf_ctx, ngx_epoll_module);
 
+    // 创建一个epollfd，放在全局变量
     if (ep == -1) {
         ep = epoll_create(cycle->connection_n / 2);
 
@@ -224,12 +225,12 @@ ngx_epoll_init(ngx_cycle_t *cycle, ngx_msec_t timer)
             return NGX_ERROR;
         }
 
-#if (NGX_HAVE_FILE_AIO)
+#if (NGX_HAVE_FILE_AIO) // 处理异步文件io
         {
         int                 n;
         struct epoll_event  ee;
 
-        ngx_eventfd = syscall(SYS_eventfd, 0);
+        ngx_eventfd = syscall(SYS_eventfd, 0); // 获取文件io的eventfd
 
         if (ngx_eventfd == -1) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
@@ -239,6 +240,7 @@ ngx_epoll_init(ngx_cycle_t *cycle, ngx_msec_t timer)
 
         n = 1;
 
+        // 设置ngx_eventfd为无阻塞文件io
         if (ioctl(ngx_eventfd, FIONBIO, &n) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
                           "ioctl(eventfd, FIONBIO) failed");
@@ -247,7 +249,7 @@ ngx_epoll_init(ngx_cycle_t *cycle, ngx_msec_t timer)
         ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                        "eventfd: %d", ngx_eventfd);
 
-        n = io_setup(1024, &ngx_aio_ctx);
+        n = io_setup(1024, &ngx_aio_ctx); // 初始化异步文件io 上下文
 
         if (n != 0) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, -n, "io_setup() failed");
@@ -262,9 +264,10 @@ ngx_epoll_init(ngx_cycle_t *cycle, ngx_msec_t timer)
         ngx_eventfd_conn.read = &ngx_eventfd_event;
         ngx_eventfd_conn.log = cycle->log;
 
-        ee.events = EPOLLIN|EPOLLET;
+        ee.events = EPOLLIN|EPOLLET; //使用ET模式处理文件事件，只处理读事件
         ee.data.ptr = &ngx_eventfd_conn;
 
+        // 加入读取文件事件
         if (epoll_ctl(ep, EPOLL_CTL_ADD, ngx_eventfd, &ee) == -1) {
             ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
                           "epoll_ctl(EPOLL_CTL_ADD, eventfd) failed");
@@ -279,6 +282,7 @@ ngx_epoll_init(ngx_cycle_t *cycle, ngx_msec_t timer)
             ngx_free(event_list);
         }
 
+        // 分配epoll events
         event_list = ngx_alloc(sizeof(struct epoll_event) * epcf->events,
                                cycle->log);
         if (event_list == NULL) {
@@ -527,10 +531,13 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "epoll timer: %M", timer);
 
+    // 调用epoll_wait
     events = epoll_wait(ep, event_list, (int) nevents, timer);
 
     err = (events == -1) ? ngx_errno : 0;
 
+    // 这里时更新时间的时机之一
+    // 如果SIGALRM的回调函数被调用，那么ngx_event_timer_alarm设为1，此时更新时间
     if (flags & NGX_UPDATE_TIME || ngx_event_timer_alarm) {
         ngx_time_update();
     }
@@ -538,6 +545,7 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     if (err) {
         if (err == NGX_EINTR) {
 
+            // 如果是被时钟中断，那么返回NGX_OK
             if (ngx_event_timer_alarm) {
                 ngx_event_timer_alarm = 0;
                 return NGX_OK;
@@ -570,12 +578,12 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     for (i = 0; i < events; i++) {
         c = event_list[i].data.ptr;
 
-        instance = (uintptr_t) c & 1;
-        c = (ngx_connection_t *) ((uintptr_t) c & (uintptr_t) ~1);
+        instance = (uintptr_t) c & 1; //　取出藏在地址中的instance
+        c = (ngx_connection_t *) ((uintptr_t) c & (uintptr_t) ~1); // 取出藏在地址中的connection地址
 
         rev = c->read;
 
-        if (c->fd == -1 || rev->instance != instance) {
+        if (c->fd == -1 || rev->instance != instance) { //instance值与预期不符说明这是一个已经被关闭的连接产生的事件，忽略之。（可能是连接关闭后又建立了新的连接，然后又分配了同一个fd,从连接池中取出）
 
             /*
              * the stale event from a file descriptor
@@ -623,6 +631,7 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
             revents |= EPOLLIN|EPOLLOUT;
         }
 
+        // 读事件
         if ((revents & EPOLLIN) && rev->active) {
 
             if ((flags & NGX_POST_THREAD_EVENTS) && !rev->accept) {
@@ -645,6 +654,7 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 
         wev = c->write;
 
+        // 写事件
         if ((revents & EPOLLOUT) && wev->active) {
 
             if (flags & NGX_POST_THREAD_EVENTS) {
@@ -671,6 +681,9 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 
 #if (NGX_HAVE_FILE_AIO)
 
+/*
+ * 处理文件异步读事件
+ */
 static void
 ngx_epoll_eventfd_handler(ngx_event_t *ev)
 {
@@ -685,7 +698,7 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
 
     ngx_log_debug0(NGX_LOG_DEBUG_EVENT, ev->log, 0, "eventfd handler");
 
-    n = read(ngx_eventfd, &ready, 8);
+    n = read(ngx_eventfd, &ready, 8); // 从eventfd中读出事件个数
 
     err = ngx_errno;
 
@@ -711,6 +724,7 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
 
     while (ready) {
 
+        // 获取已经读到的事件
         events = io_getevents(ngx_aio_ctx, 1, 64, event, &ts);
 
         ngx_log_debug1(NGX_LOG_DEBUG_EVENT, ev->log, 0,
@@ -735,7 +749,7 @@ ngx_epoll_eventfd_handler(ngx_event_t *ev)
                 aio = e->data;
                 aio->res = event[i].res;
 
-                ngx_post_event(e, &ngx_posted_events);
+                ngx_post_event(e, &ngx_posted_events);  // 读出具体事件，并把它放到延后事件队列中
             }
 
             continue;

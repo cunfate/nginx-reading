@@ -49,7 +49,7 @@ ngx_atomic_t         *ngx_connection_counter = &connection_counter;
 
 ngx_atomic_t         *ngx_accept_mutex_ptr;
 ngx_shmtx_t           ngx_accept_mutex;
-ngx_uint_t            ngx_use_accept_mutex;
+ngx_uint_t            ngx_use_accept_mutex; // 确认我们是否使用accept_mutex负载均衡锁
 ngx_uint_t            ngx_accept_events;
 ngx_uint_t            ngx_accept_mutex_held;
 ngx_msec_t            ngx_accept_mutex_delay;
@@ -206,6 +206,7 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
         flags = 0;
 
     } else {
+        // 把距离最近的超时事件的时间记录在timer中
         timer = ngx_event_find_timer();
         flags = NGX_UPDATE_TIME;
 
@@ -218,15 +219,20 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
 #endif
     }
 
+    // 这里是处理负载均衡锁和accept锁的时机
     if (ngx_use_accept_mutex) {
+        // 如果负载均衡token的值大于0, 则说明负载已满，此时不再处理accept, 同时把这个值减一
         if (ngx_accept_disabled > 0) {
             ngx_accept_disabled--;
 
         } else {
+            // 尝试拿到accept锁
             if (ngx_trylock_accept_mutex(cycle) == NGX_ERROR) {
                 return;
             }
 
+            // 拿到锁之后把flag加上post标志，让所有事件的处理都延后
+            // 以免太长时间占用accept锁
             if (ngx_accept_mutex_held) {
                 flags |= NGX_POST_EVENTS;
 
@@ -234,7 +240,7 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
                 if (timer == NGX_TIMER_INFINITE
                     || timer > ngx_accept_mutex_delay)
                 {
-                    timer = ngx_accept_mutex_delay;
+                    timer = ngx_accept_mutex_delay; // 最多等ngx_accept_mutex_delay个毫秒，防止占用太久accept锁
                 }
             }
         }
@@ -242,21 +248,25 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
 
     delta = ngx_current_msec;
 
+    // 调用事件处理模块的process_events，处理一个epoll_wait的方法
     (void) ngx_process_events(cycle, timer, flags);
 
-    delta = ngx_current_msec - delta;
+    delta = ngx_current_msec - delta; //计算处理events事件所消耗的时间
 
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "timer delta: %M", delta);
 
+    // 如果有延后处理的accept事件，那么延后处理这个事件
     if (ngx_posted_accept_events) {
         ngx_event_process_posted(cycle, &ngx_posted_accept_events);
     }
 
+    // 释放accept锁
     if (ngx_accept_mutex_held) {
         ngx_shmtx_unlock(&ngx_accept_mutex);
     }
 
+    // 处理所有的超时事件
     if (delta) {
         ngx_event_expire_timers();
     }
@@ -269,12 +279,16 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
             ngx_wakeup_worker_thread(cycle);
 
         } else {
+            // 处理所有的延后事件
             ngx_event_process_posted(cycle, &ngx_posted_events);
         }
     }
 }
 
 
+/*
+ * 处理通用的read事件
+ */
 ngx_int_t
 ngx_handle_read_event(ngx_event_t *rev, ngx_uint_t flags)
 {
@@ -342,7 +356,9 @@ ngx_handle_read_event(ngx_event_t *rev, ngx_uint_t flags)
     return NGX_OK;
 }
 
-
+/*
+ * 处理通用的写事件
+ */
 ngx_int_t
 ngx_handle_write_event(ngx_event_t *wev, size_t lowat)
 {
@@ -557,6 +573,7 @@ ngx_event_module_init(ngx_cycle_t *cycle)
 
 #if !(NGX_WIN32)
 
+// 标记需要更新时间
 void
 ngx_timer_signal_handler(int signo)
 {
@@ -584,6 +601,7 @@ ngx_event_process_init(ngx_cycle_t *cycle)
     ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
     ecf = ngx_event_get_conf(cycle->conf_ctx, ngx_event_core_module);
 
+    // 如果设置了master模式且worker_processes比1大且设置使用accept_mutex，accept_mutex才会真正被启用
     if (ccf->master && ccf->worker_processes > 1 && ecf->accept_mutex) {
         ngx_use_accept_mutex = 1;
         ngx_accept_mutex_held = 0;
@@ -600,10 +618,12 @@ ngx_event_process_init(ngx_cycle_t *cycle)
     }
 #endif
 
+    // 初始化定时器树
     if (ngx_event_timer_init(cycle->log) == NGX_ERROR) {
         return NGX_ERROR;
     }
 
+    // 找出使用的事件模块，调用模块中的init方法
     for (m = 0; ngx_modules[m]; m++) {
         if (ngx_modules[m]->type != NGX_EVENT_MODULE) {
             continue;
@@ -625,6 +645,8 @@ ngx_event_process_init(ngx_cycle_t *cycle)
 
 #if !(NGX_WIN32)
 
+    // 如果nginx使用ngx_timer_resolution配置了控制时间精度，这时候调用setittimer来设置时间为ngx_timer_resolution毫秒来软中断调用
+    // ngx_tiemr_signal_handler函数
     if (ngx_timer_resolution && !(ngx_event_flags & NGX_USE_TIMER_EVENT)) {
         struct sigaction  sa;
         struct itimerval  itv;
@@ -670,6 +692,7 @@ ngx_event_process_init(ngx_cycle_t *cycle)
 
 #endif
 
+    // 分配连接池
     cycle->connections =
         ngx_alloc(sizeof(ngx_connection_t) * cycle->connection_n, cycle->log);
     if (cycle->connections == NULL) {
@@ -678,6 +701,7 @@ ngx_event_process_init(ngx_cycle_t *cycle)
 
     c = cycle->connections;
 
+    // 分配读事件池
     cycle->read_events = ngx_alloc(sizeof(ngx_event_t) * cycle->connection_n,
                                    cycle->log);
     if (cycle->read_events == NULL) {
@@ -694,6 +718,7 @@ ngx_event_process_init(ngx_cycle_t *cycle)
 #endif
     }
 
+    // 分配写事件池
     cycle->write_events = ngx_alloc(sizeof(ngx_event_t) * cycle->connection_n,
                                     cycle->log);
     if (cycle->write_events == NULL) {
@@ -732,6 +757,7 @@ ngx_event_process_init(ngx_cycle_t *cycle)
 
     /* for each listening socket */
 
+    // 把监听地址放到连接池中
     ls = cycle->listening.elts;
     for (i = 0; i < cycle->listening.nelts; i++) {
 
@@ -813,8 +839,10 @@ ngx_event_process_init(ngx_cycle_t *cycle)
 
 #else
 
+        // 把listen连接的读事件设置为ngx_event_accept
         rev->handler = ngx_event_accept;
 
+        // 如果打开accept锁，则跳过后面加入事件的操作
         if (ngx_use_accept_mutex) {
             continue;
         }
@@ -838,6 +866,8 @@ ngx_event_process_init(ngx_cycle_t *cycle)
 }
 
 
+// 设置epoll所需的发送低水位标记
+// 表示缓冲区中的数据至少为多少时，才通知该事件是可读的
 ngx_int_t
 ngx_send_lowat(ngx_connection_t *c, size_t lowat)
 {

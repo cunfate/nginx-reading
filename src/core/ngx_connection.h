@@ -104,20 +104,20 @@ typedef enum {
 
 
 struct ngx_connection_s {
-    void               *data;
-    ngx_event_t        *read;
-    ngx_event_t        *write;
+    void               *data; // 未使用连接时，data充当连接池中空闲链表的Next指针。
+    ngx_event_t        *read; // 连接对应的读事件
+    ngx_event_t        *write;// 连接对应的写事件
 
-    ngx_socket_t        fd;
+    ngx_socket_t        fd; 
 
-    ngx_recv_pt         recv;
-    ngx_send_pt         send;
-    ngx_recv_chain_pt   recv_chain;
-    ngx_send_chain_pt   send_chain;
+    ngx_recv_pt         recv; // 直接接受网络字符流的方法
+    ngx_send_pt         send; // 直接发送网络字符流的方法
+    ngx_recv_chain_pt   recv_chain; // 将ngx_chain_t链表作为参数接收字符流的方法
+    ngx_send_chain_pt   send_chain; // 将ngx_chain_t链表作为参数发送字符流的方法
 
-    ngx_listening_t    *listening;
+    ngx_listening_t    *listening; // 链接对应的ngx_listening_t 对象
 
-    off_t               sent;
+    off_t               sent; // 已经发出去的字符数
 
     ngx_log_t          *log;
 

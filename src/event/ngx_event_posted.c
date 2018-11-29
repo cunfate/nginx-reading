@@ -17,6 +17,9 @@ ngx_mutex_t                      *ngx_posted_events_mutex;
 #endif
 
 
+/*
+ * 用于处理posted链表中的过期事件
+ */
 void
 ngx_event_process_posted(ngx_cycle_t *cycle,
     ngx_thread_volatile ngx_event_t **posted)

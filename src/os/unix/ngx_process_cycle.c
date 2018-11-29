@@ -137,6 +137,7 @@ ngx_master_process_cycle(ngx_cycle_t *cycle)
     /*开启工作进程*/
     ngx_start_worker_processes(cycle, ccf->worker_processes,
                                NGX_PROCESS_RESPAWN);
+    /*开启manager和cache进程*/
     ngx_start_cache_manager_processes(cycle, 0);
 
     ngx_new_binary = 0;

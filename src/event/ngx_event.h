@@ -35,6 +35,7 @@ typedef struct {
 
 
 struct ngx_event_s {
+    //事件相关的对象，一般是ngx_connection_t
     void            *data;
 
     unsigned         write:1;
@@ -53,7 +54,7 @@ struct ngx_event_s {
     unsigned         disabled:1;
 
     /* the ready event; in aio mode 0 means that no operation can be posted */
-    unsigned         ready:1;
+    unsigned         ready:1; // 标志着事件消费者是否允许消费这个事件
 
     unsigned         oneshot:1;
 
